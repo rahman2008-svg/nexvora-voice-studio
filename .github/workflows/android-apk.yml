@@ -40,7 +40,7 @@ jobs:
       - name: NDK 27.1.12297006 and CMake 3.22.1
         run: bash install-sdk-packages.sh
       - name: Cache native runtimes (sherpa-onnx AAR, omnivoice.cpp, llama.cpp)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: mobile/native/android/build
           key: nexvora-native-${{ hashFiles('mobile/native/pins.json', 'mobile/native/android/**', '!mobile/native/android/build/**', 'mobile/native/mp3/**') }}

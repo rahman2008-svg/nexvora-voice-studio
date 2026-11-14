@@ -1,6 +1,6 @@
 
 # Copyright (c) 2026 NexVora Lab's Ofc.
-# NexVora Voice Studio - Direct APK Build System
+# NexVora Voice Studio - Direct APK Build and Release
 # License: AGPL-3.0
 
 name: NexVora Voice Studio - Direct APK
@@ -8,17 +8,11 @@ name: NexVora Voice Studio - Direct APK
 on:
   workflow_dispatch:
     inputs:
-      release:
-        description: "Publish direct APK files to GitHub Releases"
-        type: boolean
-        required: true
-        default: true
       tag:
-        description: "Release version tag"
+        description: "Release version prefix"
         type: string
         required: true
         default: "v1.0.1"
-
   push:
     branches:
       - main
@@ -30,230 +24,165 @@ permissions:
 
 concurrency:
   group: nexvora-voice-studio-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
-    name: Build Android APK
+    name: Build and publish installable APKs
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
-    defaults:
-      run:
-        working-directory: mobile/android
-
     steps:
-
-      # 1. Checkout source
-      - name: Checkout Repository
+      - name: Checkout source
         uses: actions/checkout@v5
 
-      # 2. Setup Java
-      - name: Setup Java 21
+      - name: Set up Java 21
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
 
-      # 3. Setup Gradle
-      - name: Setup Gradle
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # 4. Android SDK
       - name: Configure Android SDK
-        run: |
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-          echo "Android SDK configured"
+        working-directory: mobile/android
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-      # 5. Install NDK and CMake
-      - name: Install Android Native Dependencies
-        run: |
-          bash install-sdk-packages.sh
+      - name: Install required Android NDK and CMake
+        working-directory: mobile/android
+        run: bash install-sdk-packages.sh
 
-      # 6. Prepare signing key
-      - name: Configure APK Signing
-        id: signing
+      - name: Configure APK signing
+        shell: bash
         env:
           KEYSTORE_B64: ${{ secrets.NEXVORA_ANDROID_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.NEXVORA_ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.NEXVORA_ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.NEXVORA_ANDROID_KEY_PASSWORD }}
+          KEYSTORE_PASSWORD_SECRET: ${{ secrets.NEXVORA_ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS_SECRET: ${{ secrets.NEXVORA_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD_SECRET: ${{ secrets.NEXVORA_ANDROID_KEY_PASSWORD }}
         run: |
-          set -e
+          set -euo pipefail
+          KEYSTORE="$RUNNER_TEMP/nexvora-release.jks"
 
-          if [ -n "$KEYSTORE_B64" ] &&
-             [ -n "$KEYSTORE_PASSWORD" ] &&
-             [ -n "$KEY_ALIAS" ] &&
-             [ -n "$KEY_PASSWORD" ]; then
-
-            echo "$KEYSTORE_B64" | base64 --decode \
-              > "$RUNNER_TEMP/nexvora-release.jks"
-
-            keytool -list \
-              -keystore "$RUNNER_TEMP/nexvora-release.jks" \
-              -storepass "$KEYSTORE_PASSWORD" \
-              -alias "$KEY_ALIAS" >/dev/null
-
-            echo "self_signed=false" >> "$GITHUB_OUTPUT"
-
+          if [[ -n "${KEYSTORE_B64:-}" && -n "${KEYSTORE_PASSWORD_SECRET:-}" && -n "${KEY_ALIAS_SECRET:-}" && -n "${KEY_PASSWORD_SECRET:-}" ]]; then
+            printf '%s' "$KEYSTORE_B64" | base64 --decode > "$KEYSTORE"
+            keytool -list -keystore "$KEYSTORE" -storepass "$KEYSTORE_PASSWORD_SECRET" -alias "$KEY_ALIAS_SECRET" >/dev/null
+            STORE_PASSWORD="$KEYSTORE_PASSWORD_SECRET"
+            ALIAS="$KEY_ALIAS_SECRET"
+            KEY_PASSWORD="$KEY_PASSWORD_SECRET"
           else
+            STORE_PASSWORD="$(openssl rand -hex 24)"
+            ALIAS="nexvora-ci"
+            KEY_PASSWORD="$STORE_PASSWORD"
 
-            P=$(openssl rand -hex 24)
-
-            keytool -genkeypair \
-              -keystore "$RUNNER_TEMP/nexvora-release.jks" \
-              -alias nexvora-ci \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -storepass "$P" \
-              -keypass "$P" \
+            keytool -genkeypair -noprompt \
+              -keystore "$KEYSTORE" -storetype JKS \
+              -alias "$ALIAS" -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$STORE_PASSWORD" -keypass "$KEY_PASSWORD" \
               -dname "CN=NexVora Voice Studio, O=NexVora Lab's Ofc"
 
-            KEYSTORE_PASSWORD="$P"
-            KEY_ALIAS="nexvora-ci"
-            KEY_PASSWORD="$P"
-
-            echo "::add-mask::$P"
-            echo "self_signed=true" >> "$GITHUB_OUTPUT"
-
+            echo "::warning::Temporary signing key used. Future updates signed with a different key may not install over this app."
           fi
 
           {
-            echo "NEXVORA_ANDROID_KEYSTORE=$RUNNER_TEMP/nexvora-release.jks"
-            echo "NEXVORA_ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
-            echo "NEXVORA_ANDROID_KEY_ALIAS=$KEY_ALIAS"
+            echo "NEXVORA_ANDROID_KEYSTORE=$KEYSTORE"
+            echo "NEXVORA_ANDROID_KEYSTORE_PASSWORD=$STORE_PASSWORD"
+            echo "NEXVORA_ANDROID_KEY_ALIAS=$ALIAS"
             echo "NEXVORA_ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
           } >> "$GITHUB_ENV"
 
-      # 7. Unit tests
-      - name: Run Unit Tests
+      - name: Run unit tests
         id: tests
         continue-on-error: true
-        run: |
-          ./gradlew --no-daemon testDebugUnitTest
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon testDebugUnitTest
 
-      # 8. Build APKs
-      - name: Build Debug and Release APK
+      - name: Build installable Debug and Release APKs
+        working-directory: mobile/android
         run: |
-          ./gradlew \
-            --no-daemon \
-            --stacktrace \
-            assembleDebug \
-            assembleRelease
+          ./gradlew --no-daemon --stacktrace clean assembleDebug assembleRelease
 
-      # 9. Collect APK files
-      - name: Collect and Validate APKs
-        working-directory: .
+      - name: Collect and validate APK files
+        shell: bash
         run: |
-          set -e
-
+          set -euo pipefail
           mkdir -p dist
 
           DEBUG_APK="mobile/android/app/build/outputs/apk/debug/app-debug.apk"
           RELEASE_APK="mobile/android/app/build/outputs/apk/release/app-release.apk"
 
-          test -s "$DEBUG_APK"
-          test -s "$RELEASE_APK"
+          test -s "$DEBUG_APK" || {
+            echo "::error::Debug APK was not generated"
+            exit 1
+          }
+
+          test -s "$RELEASE_APK" || {
+            echo "::error::Release APK was not generated"
+            exit 1
+          }
 
           cp "$DEBUG_APK" dist/NexVora-Voice-Studio-Debug.apk
-          cp "$RELEASE_APK" dist/NexVora-Voice-Studio-Release.apk
+          cp "$RELEASE_APK" dist/NexVora-Voice-Studio.apk
 
-          echo "APK FILES:"
-          ls -lh dist/
+          echo "Generated APK files:"
+          ls -lh dist/*.apk
+          file dist/*.apk
 
-          echo "APK_COUNT=$(find dist -maxdepth 1 -name '*.apk' | wc -l)" \
-            >> "$GITHUB_ENV"
-
-      # 10. Verify APK signatures
-      - name: Verify APK Signatures
-        working-directory: .
+      - name: Verify APK signatures
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
-          SDK_TOOLS="$ANDROID_HOME/build-tools"
-
-          APKSIGNER=$(find "$SDK_TOOLS" \
-            -name apksigner -type f | sort -V | tail -n 1)
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
 
           test -n "$APKSIGNER"
 
-          for APK in dist/*.apk; do
-            "$APKSIGNER" verify --verbose "$APK"
-            echo "Verified: $APK"
-          done
+          "$APKSIGNER" verify --verbose dist/NexVora-Voice-Studio.apk
+          "$APKSIGNER" verify --verbose dist/NexVora-Voice-Studio-Debug.apk
 
-      # 11. Generate build report
-      - name: Generate Build Summary
-        if: always()
-        working-directory: .
-        run: |
-          {
-            echo "# NexVora Voice Studio"
-            echo ""
-            echo "## Build Information"
-            echo "- Repository: $GITHUB_REPOSITORY"
-            echo "- Branch/Tag: $GITHUB_REF_NAME"
-            echo "- Commit: $GITHUB_SHA"
-            echo ""
-            echo "## APK Files"
-            if [ -d dist ]; then
-              ls -lh dist/*.apk 2>/dev/null || true
-            fi
-            echo ""
-            echo "## Unit Test Result"
-            echo "Check the Unit Tests step above."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      # 12. Publish direct APK files
-      - name: Publish GitHub Release
+      - name: Publish direct APK download links
         if: >
           success() &&
           (
-            startsWith(github.ref, 'refs/tags/v') ||
-            (
-              github.event_name == 'workflow_dispatch' &&
-              inputs.release == true
-            )
+            github.event_name == 'workflow_dispatch' ||
+            (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+            startsWith(github.ref, 'refs/tags/v')
           )
-        id: publish
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.tag || github.ref_name }}
-          name: NexVora Voice Studio ${{ inputs.tag || github.ref_name }}
+          tag_name: ${{ inputs.tag != '' && format('{0}-build.{1}', inputs.tag, github.run_number) || format('v1.0.0-build.{0}', github.run_number) }}
+          name: NexVora Voice Studio Build ${{ github.run_number }}
           target_commitish: ${{ github.sha }}
           files: |
+            dist/NexVora-Voice-Studio.apk
             dist/NexVora-Voice-Studio-Debug.apk
-            dist/NexVora-Voice-Studio-Release.apk
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
             # NexVora Voice Studio
 
+            Direct Android APK downloads:
+
+            - NexVora-Voice-Studio.apk — Release
+            - NexVora-Voice-Studio-Debug.apk — Debug
+
             Developed by Prince AR Abdur Rahman.
             Published by NexVora Lab's Ofc.
+            License: AGPL-3.0
 
-            ## Direct APK Downloads
-
-            - NexVora Voice Studio Debug APK
-            - NexVora Voice Studio Release APK
-
-            APK files are attached directly.
-            No ZIP extraction required.
-
-            ## License
-            AGPL-3.0
-
-      # 13. Report completion
-      - name: Final Build Status
+      - name: Build report
         if: always()
-        working-directory: .
+        shell: bash
         run: |
           {
-            echo ""
-            echo "## Final Status"
-            echo "- Build job: ${{ job.status }}"
+            echo "## NexVora Voice Studio APK Build"
+            echo "- Commit: $GITHUB_SHA"
             echo "- Unit tests: ${{ steps.tests.outcome }}"
-            echo "- Signing: ${{ steps.signing.outputs.self_signed }}"
+            echo "- APK build/publish job: ${{ job.status }}"
+            echo ""
+            if [[ -d dist ]]; then
+              echo "### APK files"
+              ls -lh dist/*.apk 2>/dev/null || true
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
           

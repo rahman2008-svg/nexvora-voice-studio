@@ -82,12 +82,12 @@ jobs:
           cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/dist/app-debug.apk"
           cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/dist/app-release.apk"
           ls -l "$GITHUB_WORKSPACE/dist"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nexvora-voice-studio-apks
           path: dist/*.apk
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-reports

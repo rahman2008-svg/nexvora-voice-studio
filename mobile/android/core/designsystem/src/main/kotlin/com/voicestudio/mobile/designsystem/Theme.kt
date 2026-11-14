@@ -19,6 +19,8 @@ object VSTheme {
     val inset = minOf(VSTokens.SPACING_INSET, VSTokens.SPACING_GAP).dp
     val touchTarget = (VSTokens.SPACING_GAP * 3).dp
     fun roles(palette: String, dark: Boolean): Map<String, Long> {
+        // NexVora: "default" (and "nexvora") is the NexVora brand palette; upstream palettes stay selectable.
+        if (palette == "default" || palette == "nexvora") return NexVora.roles(dark)
         val chosen = VSTokens.palettes.firstOrNull { it.id == palette }
         val fallback = VSTokens.palettes.first { it.id == "default" }
         return (if(dark) chosen?.dark ?: fallback.dark else chosen?.light ?: fallback.light)!!

@@ -27,21 +27,7 @@ import com.voicestudio.mobile.l10n.L10n
     Screen {
         ScreenTitle("mobile.tabs.settings")
         Group {
-            SettingsLink("mobile.tabs.connect",onClick=onConnect)
-            HorizontalDivider(color=role("border"))
             SettingsLink("mobile.local.models",onClick=onModels)
-        }
-        if(state.connected) {
-            Heading("mobile.settings.connection")
-            SettingsLink("mobile.settings.connection",prefs.activeUrl.orEmpty(),onConnect)
-            SettingsLink("mobile.connect.disconnect",onClick=vm::disconnect)
-            prefs.hosts.forEach {host ->
-                SettingsLink("mobile.android.host_label",host.label) {editUrl=host.url;editName=host.label}
-                if(host.url!=prefs.activeUrl) {
-                    Secondary("mobile.connect.connect",!state.busy) {vm.reconnect(host)}
-                    Secondary("mobile.connect.forget",!state.busy) {vm.forget(host.url)}
-                }
-            }
         }
             Heading("mobile.settings.appearance")
             val palettes=paletteChoices(l)
@@ -59,17 +45,13 @@ import com.voicestudio.mobile.l10n.L10n
         Heading("mobile.settings.privacy")
         Group {
             Info("mobile.simple.privacy","mobile.local.privacy",row=true)
-            HorizontalDivider(color=role("border"))
-            Toggle("mobile.simple.analytics",prefs.consent==true) {vm.consent(it)}
         }
         Heading("mobile.settings.about")
-        SupportSettingsLinks(onSupport)
         Group {
             SettingsLink("mobile.android.app_name",version) {licenses=true}
             HorizontalDivider(color=role("border"))
             SettingsLink("mobile.settings.licenses") {licenses=true}
         }
-        if(state.connected) SettingsLink("mobile.android.model_licenses") {context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse(vm.api!!.address.baseUrl.toString())))}
     }
     if(editUrl!=null) AlertDialog(onDismissRequest={editUrl=null},text={Field("mobile.android.host_label",editName,{editName=it})},confirmButton={TextButton(onClick={val url=editUrl;vm.preference {it.copy(hosts=it.hosts.map {h -> if(h.url==url) h.copy(label=editName) else h})};editUrl=null}) {Text(tr("common.save"))}},dismissButton={TextButton(onClick={editUrl=null}) {Text(tr("common.cancel"))}})
     if(licenses) AlertDialog(shape=MaterialTheme.shapes.large,onDismissRequest={licenses=false},title={Text(tr("mobile.settings.licenses"))},text={

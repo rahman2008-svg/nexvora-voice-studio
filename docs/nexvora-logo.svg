@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">NexVora Voice Studio</title>
+  <!-- Copyright (c) 2026 NexVora Lab's Ofc. Original NexVora artwork. -->
+  <defs>
+    <linearGradient id="neon" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#00D5FF"/>
+      <stop offset="0.55" stop-color="#8957FF"/>
+      <stop offset="1" stop-color="#E83EFF"/>
+    </linearGradient>
+  </defs>
+  <path d="M18 44V18L46 44V18" fill="none" stroke="url(#neon)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M10 54H17L20 49L24 59L28 47L32 59L36 50L39 54H54" fill="none" stroke="url(#neon)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

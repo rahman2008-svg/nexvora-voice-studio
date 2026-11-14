@@ -18,11 +18,9 @@ def android(**attrs):
 def generate(repository, output):
     contributors = runpy.run_path(str(repository / "scripts/prepare_mobile_contributors.py"))
     contributors["prepare_android_icons"](repository, output)
-    logo = ET.parse(repository / 'docs/logo.svg').getroot()
+    logo = ET.parse(repository / 'docs/nexvora-logo.svg').getroot()
     tokens = json.loads((repository / 'mobile/contract/tokens.json').read_text())
-    canvas = next(p for p in tokens['palettes'] if p['id'] == 'default')['colors'][tokens['defaultMode']]['canvas']
-    # Contract colors are RGBA; Android resources use ARGB.
-    canvas = '#' + canvas[7:9] + canvas[1:7]
+    canvas = '#FF050817'  # NexVora background (#050817), ARGB
     gradients = {node.attrib['id']: node for node in logo.findall(f'.//{{{SVG}}}linearGradient')}
 
     def write(name, node):

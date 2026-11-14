@@ -4,47 +4,34 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
+// NexVora modification (c) 2026 NexVora Lab's Ofc, AGPL-3.0: independent identity, fixed 1.0.0 / 100.
+// The upstream "content report" upload endpoint was removed: nothing user-generated leaves the device.
 val repository = rootDir.resolve("../..")
-val appVersion = (JsonSlurper().parse(repository.resolve("package.json")) as Map<*, *>)["version"].toString()
-// Play accepts any versionName, but the code must be numeric; a beta's -beta.N maps to its X.Y.Z.
-val (major, minor, patch) = Regex("""(\d+)\.(\d+)\.(\d+)(?:-beta\.\d+)?""").matchEntire(appVersion)?.destructured
-    ?: error("Unsupported app version for Android: $appVersion")
-// Play uploads pass a new, increasing code per upload; local builds derive it from the version.
-val appVersionCode = providers.environmentVariable("VOICESTUDIO_ANDROID_VERSION_CODE").orNull?.toInt()
-    ?: (major.toInt() * 1000000 + minor.toInt() * 1000 + patch.toInt())
-// The Play upload key, supplied only by the Play workflow; other builds stay debug-signed.
-val uploadKeystore = providers.environmentVariable("VOICESTUDIO_ANDROID_KEYSTORE").orNull
-// Content reports (mobile/contract/SPEC.md) go to production unless VOICESTUDIO_CONTENT_REPORTS_URL,
-// from the environment or mobile/.env, points this build elsewhere (e.g. https://dev-appapi.voicestudio.sh).
-val mobileDotenv = repository.resolve("mobile/.env").takeIf { it.isFile }?.readLines().orEmpty()
-    .mapNotNull { Regex("""\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*""").matchEntire(it)?.destructured }
-    .associate { (key, value) -> key to value.trim('"', '\'') }
-val contentReportsUrl = (providers.environmentVariable("VOICESTUDIO_CONTENT_REPORTS_URL").orNull?.takeIf { it.isNotBlank() }
-    ?: mobileDotenv["VOICESTUDIO_CONTENT_REPORTS_URL"]).orEmpty().trim().trimEnd('/').ifEmpty { "https://appapi.voicestudio.sh" }
-require(Regex("""https://[A-Za-z0-9.-]+(?::\d+)?(?:/[A-Za-z0-9._~/-]*)?""").matches(contentReportsUrl)) {
-    "VOICESTUDIO_CONTENT_REPORTS_URL must be an https URL, got $contentReportsUrl"
-}
+val appVersion = "1.0.0"
+val appVersionCode = 100
+// Signing keystore, supplied by the NexVora build workflow (GitHub Secrets) or a throwaway key it generates.
+val uploadKeystore = providers.environmentVariable("NEXVORA_ANDROID_KEYSTORE").orNull
 android {
     namespace = "com.voicestudio.mobile"
     compileSdk = 36
     ndkVersion = "27.1.12297006"
     defaultConfig {
-        // Store identity (voicestudio.sh); the Kotlin namespace stays com.voicestudio.mobile.
-        applicationId = "sh.voicestudio.mobile"
+        // Store identity is com.nexvora.voicestudio; the Kotlin namespace stays com.voicestudio.mobile
+        // (upstream code and its JNI symbol names are preserved, so native bindings stay verifiable).
+        applicationId = "com.nexvora.voicestudio"
         minSdk = 29
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersion
-        buildConfigField("String", "CONTENT_REPORTS_URL", "\"$contentReportsUrl\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     if (uploadKeystore != null) {
         signingConfigs.create("upload") {
             storeFile = file(uploadKeystore)
-            storePassword = providers.environmentVariable("VOICESTUDIO_ANDROID_KEYSTORE_PASSWORD").get()
-            keyAlias = providers.environmentVariable("VOICESTUDIO_ANDROID_KEY_ALIAS").get()
-            keyPassword = providers.environmentVariable("VOICESTUDIO_ANDROID_KEY_PASSWORD").get()
+            storePassword = providers.environmentVariable("NEXVORA_ANDROID_KEYSTORE_PASSWORD").get()
+            keyAlias = providers.environmentVariable("NEXVORA_ANDROID_KEY_ALIAS").get()
+            keyPassword = providers.environmentVariable("NEXVORA_ANDROID_KEY_PASSWORD").get()
         }
         buildTypes.getByName("release").signingConfig = signingConfigs.getByName("upload")
     }
@@ -94,8 +81,11 @@ val bundleCatalogs by tasks.registering {
         contracts.resolve("support-artwork").copyRecursively(assets.resolve("support-artwork"), overwrite = true)
         contracts.resolve("tokens.json").copyTo(assets.resolve("tokens.json"), overwrite = true)
         val en = JsonSlurper().parse(catalogs.resolve("en.json")) as Map<*, *>
-        val label = (en["app"] as Map<*, *>)["name"].toString()
+        val label = "NexVora Voice Studio"
         val res = layout.buildDirectory.dir("generated/catalogResources/values").get().asFile.apply { mkdirs() }
+        // Rebrand user-visible catalog text at build time; upstream catalogs stay untouched on disk.
+        (out.listFiles().orEmpty().toList() + assets.listFiles { f -> f.name.startsWith("strings") && f.name.endsWith(".json") }.orEmpty().toList())
+            .forEach { f -> f.writeText(f.readText().replace("VoiceStudio", "NexVora Voice Studio")) }
         res.resolve("strings.xml").writeText("<resources><string name=\"app_name\">$label</string></resources>")
     }
 }
@@ -166,7 +156,7 @@ tasks.named("preBuild") { dependsOn(buildNativeRuntimes) }
 
 val generateBrandResources by tasks.registering(Exec::class) {
     val generator = rootDir.resolve("scripts/generate_brand_resources.py")
-    inputs.files(generator, repository.resolve("docs/logo.svg"), repository.resolve("mobile/contract/tokens.json"),
+    inputs.files(generator, repository.resolve("docs/nexvora-logo.svg"), repository.resolve("mobile/contract/tokens.json"),
         repository.resolve("scripts/prepare_mobile_contributors.py"),
         repository.resolve("electron/src/renderer/src/components/brand-icons.tsx"))
     outputs.dir(layout.buildDirectory.dir("generated/brandResources"))

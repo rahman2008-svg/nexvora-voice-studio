@@ -18,7 +18,7 @@ class PhoneWidget: AppWidgetProvider() {
             val views=RemoteViews(context.packageName,R.layout.phone_widget)
             listOf("speak" to R.id.widget_speak,"dictate" to R.id.widget_dictate).forEach {(route,view) ->
                 views.setTextViewText(view,l.t("mobile.integration.shortcut_$route"))
-                val intent=Intent(Intent.ACTION_VIEW,Uri.parse("voicestudio://workspace/$route"),context,MainActivity::class.java)
+                val intent=Intent(Intent.ACTION_VIEW,Uri.parse("nexvoravoice://workspace/$route"),context,MainActivity::class.java)
                 views.setOnClickPendingIntent(view,PendingIntent.getActivity(context,view,intent,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             }
             manager.updateAppWidget(id,views)

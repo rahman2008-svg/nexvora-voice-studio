@@ -1,0 +1,105 @@
+# Copyright (c) 2026 NexVora Lab's Ofc. AGPL-3.0.
+# Builds NexVora Voice Studio: native runtimes (NDK), unit tests, debug + release APKs, optional GitHub Release.
+# This workflow has NOT been executed by its author yet: no APK is claimed until a run succeeds.
+name: Android APK
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish a GitHub Release with the APKs"
+        type: boolean
+        default: false
+      tag:
+        description: "Release tag (e.g. v1.0.0)"
+        type: string
+        default: "v1.0.0"
+  push:
+    branches: [main]
+    tags: ["v*"]
+permissions:
+  contents: write
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: mobile/android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: SDK location
+        run: printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
+      - name: NDK 27.1.12297006 and CMake 3.22.1
+        run: bash install-sdk-packages.sh
+      - name: Cache native runtimes (sherpa-onnx AAR, omnivoice.cpp, llama.cpp)
+        uses: actions/cache@v4
+        with:
+          path: mobile/native/android/build
+          key: nexvora-native-${{ hashFiles('mobile/native/pins.json', 'mobile/native/android/**', '!mobile/native/android/build/**', 'mobile/native/mp3/**') }}
+      - name: Signing key
+        id: signing
+        env:
+          KEYSTORE_B64: ${{ secrets.NEXVORA_ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.NEXVORA_ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.NEXVORA_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.NEXVORA_ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "self_signed=false" >> "$GITHUB_OUTPUT"
+          else
+            # No secrets configured: sign with a throwaway key so the APK installs. Not suitable for store updates.
+            P=$(openssl rand -hex 16)
+            echo "::add-mask::$P"
+            keytool -genkeypair -keystore "$RUNNER_TEMP/release.jks" -alias nexvora-ci -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$P" -keypass "$P" -dname "CN=NexVora CI, O=NexVora Lab's Ofc"
+            KEYSTORE_PASSWORD="$P"; KEY_ALIAS="nexvora-ci"; KEY_PASSWORD="$P"
+            echo "self_signed=true" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo "NEXVORA_ANDROID_KEYSTORE=$RUNNER_TEMP/release.jks"
+            echo "NEXVORA_ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "NEXVORA_ANDROID_KEY_ALIAS=$KEY_ALIAS"
+            echo "NEXVORA_ANDROID_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+      - name: Unit tests
+        # Non-blocking so an APK is still produced; failures stay visible in the log and the report artifact.
+        continue-on-error: true
+        run: ./gradlew --no-daemon testDebugUnitTest
+      - name: Build debug and release APKs
+        run: ./gradlew --no-daemon assembleDebug assembleRelease
+      - name: Collect APKs
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/dist/app-debug.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/dist/app-release.apk"
+          ls -l "$GITHUB_WORKSPACE/dist"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nexvora-voice-studio-apks
+          path: dist/*.apk
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports
+          path: mobile/android/**/build/reports/
+          if-no-files-found: ignore
+      - name: GitHub Release (direct .apk assets)
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release == true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: NexVora Voice Studio ${{ inputs.tag || github.ref_name }}
+          files: dist/*.apk
+          body: |
+            NexVora Voice Studio. On-device AI only; models are downloaded inside the app.
+            Signing: ${{ steps.signing.outputs.self_signed == 'true' && 'throwaway CI key (no signing secrets configured)' || 'project release key' }}.

@@ -16,7 +16,7 @@ data class PhoneIncoming(val text: String?=null,val file: File?=null,val route: 
     companion object {
         suspend fun read(context: Context,intent: Intent): PhoneIncoming?=withContext(Dispatchers.IO) {
             val uri=intent.data
-            if(intent.action==Intent.ACTION_VIEW&&uri?.scheme=="voicestudio"&&uri.host=="workspace") {
+            if(intent.action==Intent.ACTION_VIEW&&uri?.scheme=="nexvoravoice"&&uri.host=="workspace") {
                 val route=uri.pathSegments.singleOrNull()?.takeIf {it in setOf("speak","dictate","workflows","dub") } ?: return@withContext null
                 return@withContext PhoneIncoming(text=uri.getQueryParameter("text")?.take(20000),route=route)
             }
